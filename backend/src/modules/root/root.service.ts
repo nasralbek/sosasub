@@ -14,6 +14,26 @@ import { TRequestTemplateTypeKeys } from '@remnawave/backend-contract';
 import { AxiosService } from '@common/axios/axios.service';
 import { sanitizeUsername } from '@common/utils';
 
+// Интерфейсы для Xray JSON конфигурации
+interface XrayOutbound {
+    tag: string;
+    protocol: string;
+    settings?: unknown;
+    streamSettings?: unknown;
+    mux?: unknown;
+}
+
+interface XrayConfig {
+    remarks: string;
+    outbounds: XrayOutbound[];
+    dns?: unknown;
+    log?: unknown;
+    stats?: unknown;
+    policy?: unknown;
+    routing?: unknown;
+    inbounds?: unknown[];
+}
+
 @Injectable()
 export class RootService {
     private readonly logger = new Logger(RootService.name);
@@ -109,7 +129,18 @@ export class RootService {
                     });
             }
 
-            res.status(200).send(subscriptionDataResponse.response);
+            // Модифицируем Xray JSON, если это он
+            let responseData = subscriptionDataResponse.response;
+            if (this.isXrayJsonResponse(responseData)) {
+                responseData = this.modifyXrayJsonConfig(responseData as XrayConfig[]);
+                
+                // Удаляем заголовки кэширования, т.к. мы модифицировали данные
+                res.removeHeader('etag');
+                res.removeHeader('last-modified');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            }
+
+            res.status(200).send(responseData);
         } catch (error) {
             this.logger.error('Error in serveSubscriptionPage', error);
 
@@ -312,5 +343,162 @@ export class RootService {
         }
 
         return true;
+    }
+
+    /**
+     * Проверяет, является ли ответ Xray JSON конфигурацией
+     */
+    private isXrayJsonResponse(response: unknown): boolean {
+        if (!Array.isArray(response)) {
+            return false;
+        }
+
+        if (response.length === 0) {
+            return false;
+        }
+
+        // Проверяем, что каждый элемент имеет remarks и outbounds
+        return response.every(
+            (item) =>
+                typeof item === 'object' &&
+                item !== null &&
+                'remarks' in item &&
+                'outbounds' in item &&
+                Array.isArray((item as XrayConfig).outbounds),
+        );
+    }
+
+    /**
+     * Извлекает название локации из remarks
+     * "🇵🇱 Poland" → "poland"
+     * "🇸🇪 [L7] Sweden " → "sweden"
+     */
+    private extractLocationFromRemarks(remarks: string): string {
+        // Удаляем эмодзи флагов (региональные индикаторы Unicode)
+        const withoutEmoji = remarks.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '');
+
+        // Удаляем квадратные скобки с содержимым [L7], [US] и т.д.
+        const withoutBrackets = withoutEmoji.replace(/\[.*?\]/g, '');
+
+        // Берем последнее слово, убираем пробелы и приводим к lowercase
+        const words = withoutBrackets.trim().split(/\s+/);
+        const lastWord = words[words.length - 1] || '';
+
+        return lastWord.toLowerCase();
+    }
+
+    /**
+     * Модифицирует Xray JSON конфигурацию:
+     * - Находит конфиг "Fastest" и удаляет из него outbound с tag="proxy"
+     * - Из ВСЕХ других конфигов берет proxy outbound, переименовывает tag в название локации и добавляет в Fastest
+     * - Добавляет outbound "russia" во все конфиги кроме Fastest, Russia, USA
+     */
+    private modifyXrayJsonConfig(configs: XrayConfig[]): XrayConfig[] {
+        this.logger.log(`Xray JSON: начинаем модификацию, всего конфигов: ${configs.length}`);
+        
+        // Логируем все remarks
+        configs.forEach((c, i) => {
+            this.logger.log(`Xray JSON: [${i}] remarks="${c.remarks}"`);
+        });
+
+        // Находим индекс конфига Fastest
+        const fastestIndex = configs.findIndex((config) =>
+            config.remarks.toLowerCase().includes('fastest'),
+        );
+
+        if (fastestIndex === -1) {
+            this.logger.warn('Xray JSON: конфиг "Fastest" не найден, пропускаем модификацию');
+            return configs;
+        }
+
+        this.logger.log(`Xray JSON: найден Fastest на индексе ${fastestIndex}`);
+
+        // Находим конфиг Russia и его proxy outbound для добавления в другие конфиги
+        const russiaConfig = configs.find((config) =>
+            config.remarks.toLowerCase().includes('russia'),
+        );
+
+        let russiaOutbound: XrayOutbound | null = null;
+        if (russiaConfig) {
+            this.logger.log(`Xray JSON: найден конфиг Russia: "${russiaConfig.remarks}"`);
+            const proxyOutbound = russiaConfig.outbounds.find(
+                (outbound) => outbound.tag === 'proxy',
+            );
+            if (proxyOutbound) {
+                russiaOutbound = {
+                    ...proxyOutbound,
+                    tag: 'russia',
+                };
+                this.logger.log('Xray JSON: russiaOutbound создан');
+            } else {
+                this.logger.warn('Xray JSON: в конфиге Russia не найден proxy outbound!');
+            }
+        } else {
+            this.logger.warn('Xray JSON: конфиг Russia не найден!');
+        }
+
+        const fastestConfig = configs[fastestIndex];
+
+        // Удаляем proxy outbound из Fastest
+        const fastestOutboundsWithoutProxy = fastestConfig.outbounds.filter(
+            (outbound) => outbound.tag !== 'proxy',
+        );
+
+        // Собираем proxy outbounds из ВСЕХ других конфигов для Fastest
+        const additionalOutbounds: XrayOutbound[] = [];
+
+        for (let i = 0; i < configs.length; i++) {
+            if (i === fastestIndex) {
+                continue; // Пропускаем Fastest
+            }
+
+            const config = configs[i];
+            const remarks = config.remarks.toLowerCase();
+            const isUsaOrRussia = remarks.includes('usa') || remarks.includes('russia');
+
+            // Находим proxy outbound
+            const proxyOutbound = config.outbounds.find((outbound) => outbound.tag === 'proxy');
+
+            if (proxyOutbound) {
+                // Извлекаем название локации из remarks
+                const locationTag = this.extractLocationFromRemarks(config.remarks);
+                this.logger.log(`Xray JSON: [${i}] "${config.remarks}" -> tag="${locationTag}"`);
+
+                if (locationTag) {
+                    // Клонируем outbound и меняем tag — добавляем в Fastest
+                    const modifiedOutbound: XrayOutbound = {
+                        ...proxyOutbound,
+                        tag: locationTag,
+                    };
+
+                    additionalOutbounds.push(modifiedOutbound);
+                } else {
+                    this.logger.warn(`Xray JSON: [${i}] пустой locationTag для "${config.remarks}"`);
+                }
+            } else {
+                this.logger.warn(`Xray JSON: [${i}] "${config.remarks}" - нет proxy outbound`);
+            }
+
+            // Добавляем outbound russia в конфиги (кроме USA и Russia)
+            if (!isUsaOrRussia && russiaOutbound) {
+                const hasRussiaOutbound = config.outbounds.some(
+                    (outbound) => outbound.tag === 'russia',
+                );
+                if (!hasRussiaOutbound) {
+                    config.outbounds.push({ ...russiaOutbound });
+                    this.logger.log(`Xray JSON: [${i}] добавлен russia outbound`);
+                }
+            }
+        }
+
+        // Обновляем outbounds в Fastest:
+        // сначала существующие (без proxy), затем добавленные из других конфигов
+        fastestConfig.outbounds = [...fastestOutboundsWithoutProxy, ...additionalOutbounds];
+
+        this.logger.log(
+            `Xray JSON: модифицирован Fastest, добавлено ${additionalOutbounds.length} outbounds: ${additionalOutbounds.map((o) => o.tag).join(', ')}`,
+        );
+
+        return configs;
     }
 }
