@@ -1,9 +1,32 @@
+#services:
+#  remnawave-subscription-page:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    env_file:
+#      - .env
+#    ports:
+#      - '127.0.0.1:3010:3010'
+#
+
 services:
   remnawave-subscription-page:
+    container_name: remnawave-subscription-page
     build:
       context: .
       dockerfile: Dockerfile
-    env_file:
-      - .env
+    environment:
+            - REMNAWAVE_PANEL_URL=http://remnawave:3000
+            - APP_PORT=3010
+            - META_TITLE="Sosa Connect"
+            - META_DESCRIPTION="Sosa Connect Subscription Page"
     ports:
       - '127.0.0.1:3010:3010'
+    networks:
+            - remnawave-network
+    volumes:
+            - ./app-config.json:/opt/app/frontend/assets/app-config.json
+networks:
+    remnawave-network:
+        driver: bridge
+        external: true

@@ -1,0 +1,207 @@
+{
+    "config": {
+        "additionalLocales": ["ru"],
+        "branding": {
+            "name": "Sosa Connect",
+            "supportUrl": "https://t.me/sosasupportbot"
+        }
+    },
+    "platforms": {
+        "ios": [
+            {
+                "id": "happ",
+                "name": "Happ",
+                "isFeatured": true,
+                "urlScheme": "happ://add/",
+                "installationStep": {
+                    "buttons": [
+                        {
+                            "buttonLink": "https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973",
+                            "buttonText": {
+                                "en": "Download from App Store [RU]",
+                                "ru": "Скачать из App Store [RU]"
+                            }
+                        },
+                        {
+                            "buttonLink": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+                            "buttonText": {
+                                "en": "Download from App Store [EU]",
+                                "ru": "Скачать из App Store [EU]"
+                            }
+                        }
+                    ],
+                    "description": {
+                        "en": "Open the page in App Store and install the app.",
+                        "ru": "Откройте страницу в App Store и установите приложение."
+                    }
+                },
+                "addSubscriptionStep": {
+                    "description": {
+                        "en": "Click the button below to add subscription",
+                        "ru": "Нажмите кнопку ниже, чтобы добавить подписку"
+                    }
+                },
+                "connectAndUseStep": {
+                    "description": {
+                        "en": "Open the app and connect to the server",
+                        "ru": "Откройте приложение и подключитесь к серверу"
+                    }
+                }
+            }
+        ],
+        "android": [
+            {
+                "id": "happ",
+                "name": "Happ",
+                "isFeatured": true,
+                "urlScheme": "happ://add/",
+                "installationStep": {
+                    "buttons": [
+                        {
+                            "buttonLink": "https://play.google.com/store/apps/details?id=com.happproxy",
+                            "buttonText": {
+                                "en": "Download from Google Play",
+                                "ru": "Скачать из Google Play"
+                            }
+                        },
+                        {
+                            "buttonLink": "https://github.com/Happ-proxy/happ-android/releases/latest/download/Happ.apk",
+                            "buttonText": {
+                                "en": "Download APK",
+                                "ru": "Скачать APK"
+                            }
+                        }
+                    ],
+                    "description": {
+                        "en": "Install Happ from Google Play Store or download APK",
+                        "ru": "Установите Happ из Google Play Store или скачайте APK, если Google Play недоступен"
+                    }
+                },
+                "addSubscriptionStep": {
+                    "description": {
+                        "en": "Click the button below to add subscription",
+                        "ru": "Нажмите кнопку ниже, чтобы добавить подписку"
+                    }
+                },
+                "connectAndUseStep": {
+                    "description": {
+                        "en": "Open the app and connect to the server",
+                        "ru": "Откройте приложение и подключитесь к серверу"
+                    }
+                }
+            }
+        ],
+        "windows": [
+            {
+                "id": "happ",
+                "name": "Happ",
+                "isFeatured": true,
+                "urlScheme": "happ://add/",
+                "installationStep": {
+                    "buttons": [
+                        {
+                            "buttonLink": "https://github.com/Happ-proxy/happ-desktop/releases/latest/download/setup-Happ.x64.exe",
+                            "buttonText": {
+                                "en": "Download app",
+                                "ru": "Скачать приложение"
+                            }
+                        }
+                    ],
+                    "description": {
+                        "en": "Download and install Happ for Windows",
+                        "ru": "Скачайте и установите Happ для Windows"
+                    }
+                },
+                "addSubscriptionStep": {
+                    "description": {
+                        "en": "Click the button below to add subscription",
+                        "ru": "Нажмите кнопку ниже, чтобы добавить подписку"
+                    }
+                },
+                "connectAndUseStep": {
+                    "description": {
+                        "en": "Open the app and connect to the server",
+                        "ru": "Откройте приложение и подключитесь к серверу"
+                    }
+                }
+            }
+        ],
+        "macos": [
+            {
+                "id": "happ",
+                "name": "Happ",
+                "isFeatured": true,
+                "urlScheme": "happ://add/",
+                "installationStep": {
+                    "buttons": [
+                        {
+                            "buttonLink": "https://apps.apple.com/ru/app/happ-proxy-utility-plus/id6746188973",
+                            "buttonText": {
+                                "en": "Download from App Store [RU]",
+                                "ru": "Скачать из App Store [RU]"
+                            }
+                        },
+                        {
+                            "buttonLink": "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215",
+                            "buttonText": {
+                                "en": "Download from App Store [EU]",
+                                "ru": "Скачать из App Store [EU]"
+                            }
+                        }
+                    ],
+                    "description": {
+                        "en": "Open the page in App Store and install the app.",
+                        "ru": "Откройте страницу в App Store и установите приложение."
+                    }
+                },
+                "addSubscriptionStep": {
+                    "description": {
+                        "en": "Click the button below to add subscription",
+                        "ru": "Нажмите кнопку ниже, чтобы добавить подписку"
+                    }
+                },
+                "connectAndUseStep": {
+                    "description": {
+                        "en": "Open the app and connect to the server",
+                        "ru": "Откройте приложение и подключитесь к серверу"
+                    }
+                }
+            }
+        ],
+        "linux": [
+            {
+                "id": "happ",
+                "name": "Happ",
+                "isFeatured": true,
+                "urlScheme": "happ://add/",
+                "installationStep": {
+                    "buttons": [
+                        {
+                            "buttonLink": "https://github.com/Happ-proxy/happ-desktop/releases/latest/",
+                            "buttonText": {
+                                "en": "Download app",
+                                "ru": "Скачать приложение"
+                            }
+                        }
+                    ],
+                    "description": {
+                        "en": "Download and install Happ for Linux",
+                        "ru": "Скачайте и установите Happ для Linux"
+                    }
+                },
+                "addSubscriptionStep": {
+                    "description": {
+                        "en": "Click the button below to add subscription",
+                        "ru": "Нажмите кнопку ниже, чтобы добавить подписку"
+                    }
+                },
+                "connectAndUseStep": {
+                    "description": {
+                        "en": "Open the app and connect to the server",
+                        "ru": "Откройте приложение и подключитесь к серверу"
+                    }
+                }
+            }
+        ]
+    }
+}
