@@ -142,10 +142,15 @@ export class RootService {
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             }
 
-            // Модифицируем конфиг mihomo (Clash): шаблон + только pg proxies и proxy-groups
-            if (clientType === 'mihomo' && typeof responseData === 'string') {
+            // Модифицируем конфиг mihomo (Clash): по пути /mihomo или по User-Agent (панель отдала mihomo по UA)
+            const isMihomoRequest =
+                clientType === 'mihomo' ||
+                (typeof responseData === 'string' &&
+                    this.isMihomoUserAgent(userAgent as string) &&
+                    this.isMihomoYaml(responseData));
+            if (isMihomoRequest && typeof responseData === 'string') {
                 this.logger.log(
-                    `[mihomo] shortUuid=${shortUuidLocal}, response length=${(responseData as string).length} chars, modifying`,
+                    `[mihomo] shortUuid=${shortUuidLocal}, byPath=${clientType === 'mihomo'}, ua=${(userAgent as string)?.slice(0, 40)}, response length=${(responseData as string).length} chars, modifying`,
                 );
                 responseData = modifyMihomoConfig(responseData);
                 this.logger.log(
@@ -194,6 +199,24 @@ export class RootService {
         const genericPaths = ['favicon.ico', 'robots.txt'];
 
         return genericPaths.some((genericPath) => path.includes(genericPath));
+    }
+
+    private isMihomoUserAgent(ua: string | undefined): boolean {
+        if (!ua || typeof ua !== 'string') return false;
+        const lower = ua.toLowerCase();
+        return (
+            lower.includes('mihomo') ||
+            lower.includes('clash') ||
+            lower.includes('stash') ||
+            lower.includes('koala-clash')
+        );
+    }
+
+    private isMihomoYaml(str: string): boolean {
+        return (
+            str.includes('proxies:') &&
+            (str.includes('mixed-port') || str.includes('proxy-groups'))
+        );
     }
 
     private async returnWebpage(
