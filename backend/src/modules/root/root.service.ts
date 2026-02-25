@@ -144,7 +144,13 @@ export class RootService {
 
             // Модифицируем конфиг mihomo (Clash): шаблон + только pg proxies и proxy-groups
             if (clientType === 'mihomo' && typeof responseData === 'string') {
+                this.logger.log(
+                    `[mihomo] shortUuid=${shortUuidLocal}, response length=${(responseData as string).length} chars, modifying`,
+                );
                 responseData = modifyMihomoConfig(responseData);
+                this.logger.log(
+                    `[mihomo] modified, new length=${(responseData as string).length} chars`,
+                );
                 res.removeHeader('etag');
                 res.removeHeader('last-modified');
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');

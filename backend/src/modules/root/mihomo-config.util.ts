@@ -1,4 +1,7 @@
+import { Logger } from '@nestjs/common';
 import { parse, stringify } from 'yaml';
+
+const logger = new Logger('MihomoConfig');
 
 const URL_TEST_URL = 'https://www.gstatic.com/generate_204';
 const URL_TEST_INTERVAL = 30;
@@ -64,14 +67,20 @@ export function modifyMihomoConfig(rawYaml: string): string {
     let doc: Record<string, unknown>;
     try {
         doc = parse(rawYaml) as Record<string, unknown>;
-    } catch {
+    } catch (err) {
+        logger.warn('mihomo: YAML parse failed, returning original', err);
         return rawYaml;
     }
 
     const rawProxies = (doc.proxies as MihomoProxy[]) ?? [];
     const pgProxies = rawProxies.filter(isPgProxy);
 
+    logger.log(
+        `mihomo: parsed proxies total=${rawProxies.length}, pg (with encryption)=${pgProxies.length}`,
+    );
+
     if (pgProxies.length === 0) {
+        logger.warn('mihomo: no pg proxies found, returning original config');
         return rawYaml;
     }
 
@@ -94,6 +103,10 @@ export function modifyMihomoConfig(rawYaml: string): string {
         locationOrder.length > 0
             ? locationOrder.filter((name) => displayToShortNames.has(name))
             : [...displayToShortNames.keys()];
+
+    logger.log(
+        `mihomo: mainGroup="${mainGroupName}", locations from panel=${locationOrder.length}, matched=${locationOrderFiltered.length}, proxy-groups to build=${locationOrderFiltered.length + 1}`,
+    );
 
     const proxyGroups: MihomoProxyGroup[] = [
         {
@@ -142,5 +155,7 @@ export function modifyMihomoConfig(rawYaml: string): string {
     doc.proxies = modifiedProxies;
     doc['proxy-groups'] = proxyGroups;
 
-    return stringify(doc, { lineWidth: 0 });
+    const out = stringify(doc, { lineWidth: 0 });
+    logger.log(`mihomo: done, output length=${out.length} chars, proxies=${modifiedProxies.length}, groups=${proxyGroups.length}`);
+    return out;
 }
