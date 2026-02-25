@@ -102,6 +102,10 @@ export class RootService {
                 return this.returnWebpage(clientIp, req, res, shortUuidLocal);
             }
 
+            // Без /mihomo в пути, но UA mihomo/clash — запрашиваем у панели mihomo-конфиг
+            const effectiveClientType: TRequestTemplateTypeKeys | undefined =
+                clientType ?? (this.isMihomoUserAgent(userAgent as string) ? ('mihomo' as TRequestTemplateTypeKeys) : undefined);
+
             let subscriptionDataResponse: {
                 response: unknown;
                 headers: RawAxiosResponseHeaders | AxiosResponseHeaders;
@@ -111,8 +115,8 @@ export class RootService {
                 clientIp,
                 shortUuidLocal,
                 req.headers,
-                !!clientType,
-                clientType,
+                !!effectiveClientType,
+                effectiveClientType,
             );
 
             if (!subscriptionDataResponse) {
@@ -142,15 +146,10 @@ export class RootService {
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             }
 
-            // Модифицируем конфиг mihomo (Clash): по пути /mihomo или по User-Agent (панель отдала mihomo по UA)
-            const isMihomoRequest =
-                clientType === 'mihomo' ||
-                (typeof responseData === 'string' &&
-                    this.isMihomoUserAgent(userAgent as string) &&
-                    this.isMihomoYaml(responseData));
-            if (isMihomoRequest && typeof responseData === 'string') {
+            // Модифицируем конфиг mihomo (Clash): запрос был по /mihomo или по UA (effectiveClientType уже 'mihomo')
+            if (effectiveClientType === 'mihomo' && typeof responseData === 'string') {
                 this.logger.log(
-                    `[mihomo] shortUuid=${shortUuidLocal}, byPath=${clientType === 'mihomo'}, ua=${(userAgent as string)?.slice(0, 40)}, response length=${(responseData as string).length} chars, modifying`,
+                    `[mihomo] shortUuid=${shortUuidLocal}, byPath=${clientType === 'mihomo'}, ua=${(userAgent as string)?.slice(0, 50)}, response length=${(responseData as string).length} chars, modifying`,
                 );
                 responseData = modifyMihomoConfig(responseData);
                 this.logger.log(
