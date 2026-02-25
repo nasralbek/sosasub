@@ -14,6 +14,8 @@ import { TRequestTemplateTypeKeys } from '@remnawave/backend-contract';
 import { AxiosService } from '@common/axios/axios.service';
 import { sanitizeUsername } from '@common/utils';
 
+import { modifyMihomoConfig } from './mihomo-config.util';
+
 // Интерфейсы для Xray JSON конфигурации
 interface XrayOutbound {
     tag: string;
@@ -135,6 +137,14 @@ export class RootService {
                 responseData = this.modifyXrayJsonConfig(responseData as XrayConfig[]);
                 
                 // Удаляем заголовки кэширования, т.к. мы модифицировали данные
+                res.removeHeader('etag');
+                res.removeHeader('last-modified');
+                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            }
+
+            // Модифицируем конфиг mihomo (Clash): шаблон + только pg proxies и proxy-groups
+            if (clientType === 'mihomo' && typeof responseData === 'string') {
+                responseData = modifyMihomoConfig(responseData);
                 res.removeHeader('etag');
                 res.removeHeader('last-modified');
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
