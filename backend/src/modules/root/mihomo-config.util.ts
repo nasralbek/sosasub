@@ -82,16 +82,15 @@ export function modifyMihomoConfig(rawYaml: string): string {
     }
 
     const rawProxies = (doc.proxies as MihomoProxy[]) ?? [];
-    const pgProxies = rawProxies.filter(isPgProxy);
 
-    logger.log(`mihomo: total proxies=${rawProxies.length}, pg=${pgProxies.length}`);
+    logger.log(`mihomo: total proxies=${rawProxies.length}`);
 
-    if (pgProxies.length === 0) {
-        logger.warn('mihomo: no pg proxies found, returning original');
+    if (rawProxies.length === 0) {
+        logger.warn('mihomo: no proxies found, returning original');
         return rawYaml;
     }
 
-    const filtered = pgProxies.filter((p) => !isWlProxy(p.name));
+    const filtered = rawProxies.filter((p) => !isWlProxy(p.name));
     logger.log(`mihomo: after WL_ filter: ${filtered.length} proxies`);
 
     const displayToShortNames = new Map<string, string[]>();
