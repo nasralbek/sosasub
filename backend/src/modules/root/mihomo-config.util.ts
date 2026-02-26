@@ -28,15 +28,19 @@ interface MihomoProxyGroup {
     'expected-status'?: number;
 }
 
-function isPgProxy(proxy: MihomoProxy): boolean {
-    return typeof (proxy as MihomoProxy & { encryption?: string }).encryption === 'string';
+/**
+ * "polandpg" → "poland"
+ * "germany3pg" → "germany3" → мы группируем ниже по стране
+ * "🇵🇱 Poland1pg" → "🇵🇱 Poland1"
+ */
+function stripPgSuffix(name: string): string {
+    return name.replace(/pg$/i, '');
 }
 
 /**
- * Та же логика что и createTagFromRemarks в xray модификаторе:
+ * Та же логика что createTagFromRemarks в xray модификаторе:
  * "🇵🇱 Poland1pg" → "poland1pg"
- * "🇩🇪 Germany3pg" → "germany3pg"
- * "🇷🇺 WL_RUSSIA_TW_1pg" → "wlrussiatw1pg"
+ * "polandpg" → "polandpg"
  */
 function toShortName(name: string): string {
     const withoutEmoji = name.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '');
@@ -45,31 +49,37 @@ function toShortName(name: string): string {
     return sanitized.toLowerCase();
 }
 
-function extractFlagEmoji(name: string): string {
-    const match = name.match(/[\u{1F1E0}-\u{1F1FF}]{2}/gu);
-    return match ? match[0] : '';
+/**
+ * Извлекает базовое имя страны для группировки:
+ * "polandpg" → "poland"
+ * "germany3pg" → "germany"
+ * "🇵🇱 Poland1pg" → "poland"
+ * "wl_russia_tw_pg" → "wlrussiatw"
+ */
+function getBaseCountry(name: string): string {
+    const short = toShortName(name);
+    return short.replace(/\d*pg$/i, '');
 }
 
 /**
- * "🇵🇱 Poland1pg" → "Poland"
- * "🇩🇪 Germany3pg" → "Germany"
+ * Ищет в списке групп панели группу, чьё имя (без эмодзи, lowercase) совпадает с baseCountry.
+ * "poland" → "🇵🇱 Poland"
  */
-function extractCountryName(name: string): string {
-    const withoutEmoji = name.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '').trim();
-    return withoutEmoji.replace(/\d+pg$/i, '').trim();
-}
-
-/**
- * "🇵🇱 Poland1pg" → "🇵🇱 Poland"
- */
-function toDisplayGroupName(name: string): string {
-    const flag = extractFlagEmoji(name);
-    const country = extractCountryName(name);
-    return flag ? `${flag} ${country}` : country;
+function findDisplayGroupName(baseCountry: string, panelGroupNames: string[]): string | null {
+    const lower = baseCountry.toLowerCase();
+    for (const gn of panelGroupNames) {
+        const stripped = gn
+            .replace(/[\p{Emoji}\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu, '')
+            .trim()
+            .toLowerCase();
+        if (stripped === lower) return gn;
+    }
+    return null;
 }
 
 function isWlProxy(name: string): boolean {
-    return name.includes('WL_') || toShortName(name).startsWith('wl');
+    const lower = name.toLowerCase();
+    return lower.startsWith('wl_') || lower.startsWith('wl ') || toShortName(name).startsWith('wl');
 }
 
 export function modifyMihomoConfig(rawYaml: string): string {
@@ -93,54 +103,78 @@ export function modifyMihomoConfig(rawYaml: string): string {
     const filtered = rawProxies.filter((p) => !isWlProxy(p.name));
     logger.log(`mihomo: after WL_ filter: ${filtered.length} proxies`);
 
-    const displayToShortNames = new Map<string, string[]>();
-    const modifiedProxies: MihomoProxy[] = [];
-    const groupOrder: string[] = [];
-
-    for (const p of filtered) {
-        const shortName = toShortName(p.name);
-        const displayName = toDisplayGroupName(p.name);
-
-        modifiedProxies.push({ ...p, name: shortName });
-
-        if (!displayToShortNames.has(displayName)) {
-            displayToShortNames.set(displayName, []);
-            groupOrder.push(displayName);
-        }
-        displayToShortNames.get(displayName)!.push(shortName);
-    }
-
     const panelGroups = (doc['proxy-groups'] as MihomoProxyGroup[] | undefined) ?? [];
     const selectGroup = panelGroups.find((g) => g.type === 'select');
     const mainGroupName = selectGroup?.name ?? 'Sosa';
+    const panelGroupNames: string[] = selectGroup?.proxies ?? [];
 
-    // Панель отдаёт в select-группе отдельные прокси, не страны.
-    // Извлекаем уникальные страны в порядке панели.
-    const panelLocationOrder: string[] = [];
-    const seenLocations = new Set<string>();
-    if (selectGroup?.proxies) {
-        for (const proxyName of selectGroup.proxies) {
-            if (isWlProxy(proxyName)) continue;
-            const displayName = toDisplayGroupName(proxyName);
-            if (!seenLocations.has(displayName) && displayToShortNames.has(displayName)) {
-                seenLocations.add(displayName);
-                panelLocationOrder.push(displayName);
-            }
+    // Группируем прокси по базовому имени страны
+    const countryProxies = new Map<string, MihomoProxy[]>();
+    const countryOrder: string[] = [];
+
+    for (const p of filtered) {
+        const base = getBaseCountry(p.name);
+        if (!countryProxies.has(base)) {
+            countryProxies.set(base, []);
+            countryOrder.push(base);
+        }
+        countryProxies.get(base)!.push(p);
+    }
+
+    // Маппинг baseCountry → displayName из панели
+    const baseToDisplay = new Map<string, string>();
+    for (const base of countryOrder) {
+        const display = findDisplayGroupName(base, panelGroupNames);
+        if (display) {
+            baseToDisplay.set(base, display);
+        } else {
+            logger.warn(`mihomo: no panel group for base="${base}", skipping`);
         }
     }
 
-    const locationOrder = panelLocationOrder.length > 0 ? panelLocationOrder : groupOrder;
+    // Переименовываем прокси с уникальными именами
+    const modifiedProxies: MihomoProxy[] = [];
+    const displayToShortNames = new Map<string, string[]>();
+    const locationOrder: string[] = [];
+
+    for (const base of countryOrder) {
+        const display = baseToDisplay.get(base);
+        if (!display) continue;
+
+        const proxies = countryProxies.get(base)!;
+
+        if (!displayToShortNames.has(display)) {
+            displayToShortNames.set(display, []);
+            locationOrder.push(display);
+        }
+
+        for (let i = 0; i < proxies.length; i++) {
+            const shortName = `${base}${i + 1}pg`;
+            modifiedProxies.push({ ...proxies[i], name: shortName });
+            displayToShortNames.get(display)!.push(shortName);
+        }
+    }
+
+    // Используем порядок стран из панели если возможно
+    const panelLocationOrder: string[] = [];
+    for (const name of panelGroupNames) {
+        if (displayToShortNames.has(name)) {
+            panelLocationOrder.push(name);
+        }
+    }
+    const finalLocationOrder = panelLocationOrder.length > 0 ? panelLocationOrder : locationOrder;
 
     logger.log(
-        `mihomo: mainGroup="${mainGroupName}", locations=${locationOrder.length}, proxies=${modifiedProxies.length}`,
+        `mihomo: mainGroup="${mainGroupName}", locations=${finalLocationOrder.length}, proxies=${modifiedProxies.length}`,
     );
 
+    // Собираем proxy-groups
     const proxyGroups: MihomoProxyGroup[] = [];
 
     proxyGroups.push({
         name: mainGroupName,
         type: 'select',
-        proxies: ['🇪🇺 Fastest', ...locationOrder],
+        proxies: ['🇪🇺 Fastest', ...finalLocationOrder],
         hidden: false,
     });
 
@@ -161,7 +195,7 @@ export function modifyMihomoConfig(rawYaml: string): string {
         'expected-status': 204,
     });
 
-    for (const displayName of locationOrder) {
+    for (const displayName of finalLocationOrder) {
         const shortNames = displayToShortNames.get(displayName);
         if (!shortNames?.length) continue;
         proxyGroups.push({
