@@ -3,9 +3,9 @@ import { parse, stringify } from 'yaml';
 
 const logger = new Logger('MihomoConfig');
 
-const URL_TEST_URL = 'https://www.gstatic.com/generate_204';
+const URL_TEST_URL = 'https://www.gstatic.com/generate_204https://ssl.gstatic.com/ui/v1/icons/mail/rfr/noconnection/default_400.png';
 const URL_TEST_INTERVAL = 30;
-const URL_TEST_TIMEOUT = 3000;
+const URL_TEST_TIMEOUT = 5000;
 
 interface MihomoProxy {
     name: string;
@@ -143,7 +143,7 @@ export function modifyMihomoConfig(rawYaml: string): string {
         timeout: URL_TEST_TIMEOUT,
         lazy: false,
         'max-failed-times': 1,
-        'expected-status': 204,
+        'expected-status': 200,
     });
 
     for (const groupName of sosaGroupNames) {
