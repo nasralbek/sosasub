@@ -142,8 +142,7 @@ export function modifyMihomoConfig(rawYaml: string): string {
         interval: URL_TEST_INTERVAL,
         timeout: URL_TEST_TIMEOUT,
         lazy: false,
-        'max-failed-times': 1,
-        'expected-status': 200,
+        'max-failed-times': 1
     });
 
     for (const groupName of sosaGroupNames) {
@@ -159,8 +158,7 @@ export function modifyMihomoConfig(rawYaml: string): string {
             interval: URL_TEST_INTERVAL,
             timeout: URL_TEST_TIMEOUT,
             lazy: false,
-            'max-failed-times': 1,
-            'expected-status': 204,
+            'max-failed-times': 1
         });
     }
 
