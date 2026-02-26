@@ -67,6 +67,11 @@ function isWlProxy(name: string): boolean {
     return lower.includes('wl_') || toShortName(name).startsWith('wl');
 }
 
+function isChildProxy(name: string): boolean {
+    const withoutEmoji = name.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '').trim();
+    return /\d/.test(withoutEmoji);
+}
+
 export function modifyMihomoConfig(rawYaml: string): string {
     let doc: Record<string, unknown>;
     try {
@@ -84,8 +89,8 @@ export function modifyMihomoConfig(rawYaml: string): string {
         return rawYaml;
     }
 
-    const filtered = rawProxies.filter((p) => !isWlProxy(p.name));
-    logger.log(`mihomo: after WL filter: ${filtered.length} proxies`);
+    const filtered = rawProxies.filter((p) => !isWlProxy(p.name) && isChildProxy(p.name));
+    logger.log(`mihomo: after WL+parent filter: ${filtered.length} proxies`);
 
     const panelGroups = (doc['proxy-groups'] as MihomoProxyGroup[] | undefined) ?? [];
     const selectGroup = panelGroups.find((g) => g.type === 'select');
@@ -125,12 +130,14 @@ export function modifyMihomoConfig(rawYaml: string): string {
         hidden: false,
     });
 
-    const allShortNames = modifiedProxies.map((p) => p.name);
+    const fastestProxies = modifiedProxies
+        .map((p) => p.name)
+        .filter((n) => !n.startsWith('russia'));
     proxyGroups.push({
         name: '\u{1F1EA}\u{1F1FA} Fastest',
         type: 'url-test',
         hidden: true,
-        proxies: allShortNames,
+        proxies: fastestProxies,
         url: URL_TEST_URL,
         interval: URL_TEST_INTERVAL,
         timeout: URL_TEST_TIMEOUT,
