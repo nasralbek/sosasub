@@ -451,14 +451,14 @@ export class RootService {
     };
 
     private readonly WL_RUSSIA_VK_PORT_BY_ISO: Record<string, number> = {
-        US: 2443,
-        KZ: 3443,
-        JP: 4443,
-        LV: 5443,
-        SE: 6443,
-        NO: 7443,
-        PL: 8443,
-        DE: 9443,
+        US: 9443,
+        KZ: 1443,
+        JP: 2443,
+        LV: 3443,
+        SE: 4443,
+        NO: 5443,
+        DE: 6443,
+        PL: 7443,
     };
 
     /**
@@ -675,7 +675,7 @@ export class RootService {
         const fastestId = fastestProxyOutbound
             ? this.extractIdFromOutbound(fastestProxyOutbound)
             : null;
-        const fastestWlRussiaVkPort = 443;
+        const fastestWlRussiaVkPort = 8443;
 
         // ========== Шаг 5: Собираем ВСЕ proxy outbounds из дочерних для Fastest ==========
         const allChildOutbounds: XrayOutbound[] = [];
