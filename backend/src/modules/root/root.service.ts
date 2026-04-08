@@ -675,7 +675,7 @@ export class RootService {
         const fastestId = fastestProxyOutbound
             ? this.extractIdFromOutbound(fastestProxyOutbound)
             : null;
-        const fastestWlRussiaVkPort = 8443;
+        const fastestWlRussiaVkPort = 443;
 
         // ========== Шаг 5: Собираем ВСЕ proxy outbounds из дочерних для Fastest ==========
         const allChildOutbounds: XrayOutbound[] = [];
