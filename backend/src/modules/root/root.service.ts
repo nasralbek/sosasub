@@ -450,17 +450,6 @@ export class RootService {
         EU: 'Europe',
     };
 
-    private readonly WL_RUSSIA_VK_PORT_BY_ISO: Record<string, number> = {
-        US: 9443,
-        KZ: 1443,
-        JP: 2443,
-        LV: 3443,
-        SE: 4443,
-        NO: 5443,
-        DE: 6443,
-        PL: 7443,
-    };
-
     /**
      * Извлекает эмодзи флага из remarks (2 региональных индикатора = 1 флаг)
      */
@@ -527,14 +516,6 @@ export class RootService {
         return isoCode === 'RU';
     }
 
-    private isWlRussiaVkTag(tag: string): boolean {
-        return tag.startsWith('wlrussiavk');
-    }
-
-    private getWlRussiaVkPortByIsoCode(isoCode: string): number | null {
-        return this.WL_RUSSIA_VK_PORT_BY_ISO[isoCode] ?? null;
-    }
-
     /**
      * Проверяет, является ли конфиг "чистым" (remarks = флаг + название страны точно)
      * "🇵🇱 Poland" → true (чистый)
@@ -592,24 +573,6 @@ export class RootService {
             }
         } catch (error) {
             this.logger.debug(`Failed to replace id in outbound: ${error}`);
-        }
-
-        return cloned;
-    }
-
-    private replaceOutboundPort(outbound: XrayOutbound, newPort: number): XrayOutbound {
-        const cloned = JSON.parse(JSON.stringify(outbound)) as XrayOutbound;
-
-        try {
-            const settings = cloned.settings as {
-                vnext?: Array<{ port?: number; [key: string]: unknown }>;
-            };
-
-            if (settings?.vnext?.[0]) {
-                settings.vnext[0].port = newPort;
-            }
-        } catch (error) {
-            this.logger.debug(`Failed to replace port in outbound: ${error}`);
         }
 
         return cloned;
@@ -675,7 +638,6 @@ export class RootService {
         const fastestId = fastestProxyOutbound
             ? this.extractIdFromOutbound(fastestProxyOutbound)
             : null;
-        const fastestWlRussiaVkPort = 443;
 
         // ========== Шаг 5: Собираем ВСЕ proxy outbounds из дочерних для Fastest ==========
         const allChildOutbounds: XrayOutbound[] = [];
@@ -690,10 +652,6 @@ export class RootService {
                     // Заменяем id на id из Fastest только для outbounds с префиксом "wlrussia"
                     if (fastestId && tag.startsWith('wlrussia')) {
                         outbound = this.replaceOutboundId(outbound, fastestId);
-                    }
-
-                    if (this.isWlRussiaVkTag(tag)) {
-                        outbound = this.replaceOutboundPort(outbound, fastestWlRussiaVkPort);
                     }
 
                     allChildOutbounds.push(outbound);
@@ -711,7 +669,6 @@ export class RootService {
         for (const cleanConfig of cleanConfigs) {
             const flag = this.extractFlagEmoji(cleanConfig.remarks);
             const isoCode = this.flagToIsoCode(flag);
-            const wlRussiaVkPort = this.getWlRussiaVkPortByIsoCode(isoCode);
 
             // Извлекаем id из чистого конфига
             const cleanProxyOutbound = cleanConfig.outbounds.find((o) => o.tag === 'proxy');
@@ -736,10 +693,6 @@ export class RootService {
                             outbound = this.replaceOutboundId(outbound, cleanId);
                         }
 
-                        if (wlRussiaVkPort && this.isWlRussiaVkTag(tag)) {
-                            outbound = this.replaceOutboundPort(outbound, wlRussiaVkPort);
-                        }
-
                         childOutbounds.push(outbound);
                     }
                 }
@@ -762,13 +715,6 @@ export class RootService {
                     // Заменяем id на id из чистого конфига только для outbounds с префиксом "wlrussia"
                     if (cleanId && russiaOutbound.tag.startsWith('wlrussia')) {
                         clonedRussiaOutbound = this.replaceOutboundId(clonedRussiaOutbound, cleanId);
-                    }
-
-                    if (wlRussiaVkPort && this.isWlRussiaVkTag(russiaOutbound.tag)) {
-                        clonedRussiaOutbound = this.replaceOutboundPort(
-                            clonedRussiaOutbound,
-                            wlRussiaVkPort,
-                        );
                     }
 
                     newOutbounds.push(clonedRussiaOutbound);
