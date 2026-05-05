@@ -1,4 +1,4 @@
-import { AxiosResponseHeaders, RawAxiosResponseHeaders } from 'axios';
+import axios, { AxiosResponseHeaders, RawAxiosResponseHeaders } from 'axios';
 import { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
@@ -13,7 +13,6 @@ import { TRequestTemplateTypeKeys } from '@remnawave/backend-contract';
 import { AxiosService } from '@common/axios/axios.service';
 import { sanitizeUsername } from '@common/utils';
 
-import bridgeSubscriptionSnapshot from './snapshots/ejx-bridge-subscription.json';
 import { modifyMihomoConfig } from './mihomo-config.util';
 
 // Интерфейсы для Xray JSON конфигурации
@@ -36,6 +35,16 @@ interface XrayConfig {
     inbounds?: unknown[];
 }
 
+const BRIDGE_SUBSCRIPTION_URL =
+    'https://challenge.sendly.one/private/83e34ea3712ea3c3135182ac17b771a5/85UCe88sDAMaM5XP';
+const BRIDGE_SUBSCRIPTION_CACHE_TTL_MS = 60 * 60 * 1000;
+const BRIDGE_SUBSCRIPTION_HEADERS = {
+    'user-agent': 'Happ/2.9.1/Windows/2604241012603',
+    'x-device-model': 'DESKTOP-9153KK9_x86_64',
+    'x-device-os': 'Windows',
+    'x-hwid': '932c9aec-4e4b-4159-981b-df863720d9ed',
+    'x-ver-os': '10_10.0.19045',
+};
 const BRIDGE_GROUP_ORDER = ['oc', 'vk', 'cv', 'sk', 'yc', 'ng'] as const;
 type BridgeGroup = (typeof BRIDGE_GROUP_ORDER)[number];
 const BRIDGE_GROUP_TO_SELECTOR: Record<BridgeGroup, string> = {
@@ -59,7 +68,9 @@ export class RootService {
 
     private readonly isMarzbanLegacyLinkEnabled: boolean;
     private readonly marzbanSecretKey?: string;
-    private readonly bridgeOutbounds: XrayOutbound[];
+    private bridgeOutboundsCache: XrayOutbound[] = [];
+    private bridgeOutboundsCacheAt = 0;
+    private bridgeOutboundsFetchPromise: Promise<XrayOutbound[]> | null = null;
 
     constructor(
         private readonly configService: ConfigService,
@@ -70,7 +81,6 @@ export class RootService {
             'MARZBAN_LEGACY_LINK_ENABLED',
         );
         this.marzbanSecretKey = this.configService.get<string>('MARZBAN_LEGACY_SECRET_KEY');
-        this.bridgeOutbounds = this.extractBridgeOutboundsFromSnapshot();
     }
 
     public async serveSubscriptionPage(
@@ -160,9 +170,10 @@ export class RootService {
             // Модифицируем Xray JSON, если это он
             let responseData = subscriptionDataResponse.response;
             if (this.isXrayJsonResponse(responseData)) {
+                const bridgeOutbounds = await this.getCachedBridgeOutbounds();
                 responseData = this.modifyXrayJsonConfig(
                     responseData as XrayConfig[],
-                    this.bridgeOutbounds,
+                    bridgeOutbounds,
                 );
 
                 // Удаляем заголовки кэширования, т.к. мы модифицировали данные
@@ -250,20 +261,53 @@ export class RootService {
         return JSON.parse(JSON.stringify(value)) as T;
     }
 
-    private extractBridgeOutboundsFromSnapshot(): XrayOutbound[] {
-        const snapshotConfigs = Array.isArray(bridgeSubscriptionSnapshot)
-            ? bridgeSubscriptionSnapshot
-            : [bridgeSubscriptionSnapshot];
+    private async getCachedBridgeOutbounds(): Promise<XrayOutbound[]> {
+        const now = Date.now();
 
-        const bridgeOutbounds = this.extractBridgeOutbounds(snapshotConfigs as XrayConfig[]);
-
-        if (bridgeOutbounds.length === 0) {
-            this.logger.warn('Local Xray bridge snapshot has zero tp_BRIDGE outbounds');
-        } else {
-            this.logger.log(
-                `Local Xray bridge snapshot loaded outbounds=${bridgeOutbounds.length}`,
-            );
+        if (
+            this.bridgeOutboundsCache.length > 0 &&
+            now - this.bridgeOutboundsCacheAt < BRIDGE_SUBSCRIPTION_CACHE_TTL_MS
+        ) {
+            return this.bridgeOutboundsCache.map((outbound) => this.cloneXrayOutbound(outbound));
         }
+
+        if (!this.bridgeOutboundsFetchPromise) {
+            this.bridgeOutboundsFetchPromise = this.fetchBridgeOutbounds();
+        }
+
+        try {
+            const fetchedOutbounds = await this.bridgeOutboundsFetchPromise;
+
+            if (fetchedOutbounds.length > 0) {
+                this.bridgeOutboundsCache = fetchedOutbounds.map((outbound) =>
+                    this.cloneXrayOutbound(outbound),
+                );
+                this.bridgeOutboundsCacheAt = Date.now();
+            } else {
+                this.logger.warn('Xray bridge subscription returned zero tp_BRIDGE outbounds');
+            }
+        } catch (error) {
+            this.logger.warn('Xray bridge subscription fetch failed, using cached data', error);
+        } finally {
+            this.bridgeOutboundsFetchPromise = null;
+        }
+
+        return this.bridgeOutboundsCache.map((outbound) => this.cloneXrayOutbound(outbound));
+    }
+
+    private async fetchBridgeOutbounds(): Promise<XrayOutbound[]> {
+        const response = await axios.get<unknown>(BRIDGE_SUBSCRIPTION_URL, {
+            headers: BRIDGE_SUBSCRIPTION_HEADERS,
+            timeout: 30_000,
+        });
+
+        if (!this.isXrayJsonResponse(response.data)) {
+            this.logger.warn('Xray bridge subscription response is not Xray JSON');
+            return [];
+        }
+
+        const bridgeOutbounds = this.extractBridgeOutbounds(response.data as XrayConfig[]);
+        this.logger.log(`Xray bridge subscription fetched outbounds=${bridgeOutbounds.length}`);
 
         return bridgeOutbounds;
     }
