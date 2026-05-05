@@ -1,4 +1,5 @@
-import axios, { AxiosResponseHeaders, RawAxiosResponseHeaders } from 'axios';
+import { RawAxiosResponseHeaders } from 'axios';
+import { AxiosResponseHeaders } from 'axios';
 import { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
@@ -35,42 +36,12 @@ interface XrayConfig {
     inbounds?: unknown[];
 }
 
-const BRIDGE_SUBSCRIPTION_URL =
-    'https://challenge.sendly.one/private/83e34ea3712ea3c3135182ac17b771a5/85UCe88sDAMaM5XP';
-const BRIDGE_SUBSCRIPTION_CACHE_TTL_MS = 60 * 60 * 1000;
-const BRIDGE_SUBSCRIPTION_HEADERS = {
-    'user-agent': 'Happ/2.9.1/Windows/2604241012603',
-    'x-device-model': 'DESKTOP-9153KK9_x86_64',
-    'x-device-os': 'Windows',
-    'x-hwid': '932c9aec-4e4b-4159-981b-df863720d9ed',
-    'x-ver-os': '10_10.0.19045',
-};
-const BRIDGE_GROUP_ORDER = ['oc', 'vk', 'cv', 'sk', 'yc', 'ng'] as const;
-type BridgeGroup = (typeof BRIDGE_GROUP_ORDER)[number];
-const BRIDGE_GROUP_TO_SELECTOR: Record<BridgeGroup, string> = {
-    cv: 'wlrussiaejxcv',
-    ng: 'wlrussiaejxng',
-    oc: 'wlrussiaejxoc',
-    sk: 'wlrussiaejxsk',
-    vk: 'wlrussiaejxvk',
-    yc: 'wlrussiaejxyc',
-};
-const WS_BRIDGE_PORT = 80;
-const WS_BRIDGE_ID = '53114c5a-0be7-4234-97b9-358986e73237';
-const WS_BRIDGE_ENCRYPTION =
-    'mlkem768x25519plus.random.0rtt.AmJbWeMXGJJL90RMRnsbwBVEdctBumGyIYPH5dI4uedV_1m2BYQKOvFfbUOOlheFELQGcsqviapx03HDXRg99dJEt3owPmJvZ5Vb8-SFSCfEv8SsngMnDuIDVEtIEqdkAlqkmvwoCatK0JZuY-HBtcEdl4TOKlE9hFw6RjHK3Jh3wLArgHUBupSNAGmEuBrBG-rP0xgHI8coSEocP2N1H1hf4hIuICqiPFmcuclc5mOfqYsjLKCTKDaIKRCerNWsDEU418pzRFcD5uyz67kYY5xq89F8WUZ6-JcEiQoIG-h5B_JmGYFIb1kEkyZeo4QBUfxd1Bl3-9eVaFwL7uS4YvM6cJYH-JICiOURm0qFBXkCi_yGqzIdV5g57uhJ3KsHWry6bFqzYWid5qlAqEqY-XB4HbaVSeQLfvWgxAxf2AagymeXNDYNU3Yg1DvC6Vd9z5TMmkIcuySwsEWfS0qSrrs5KZG6rUPKP1UM3vRInWV8mmpEUpLAHRfDrzp3PqIEv5cPvDce1OFu5WiuLeenT9SuKzRKd9IGLQRWWWe579Q-r1dgFBSI2-A1ZVmAW3dshHgXgDyJQ0Bzb1GCy2oN82G5hRVHe4d-KsycwXvK-deJn3ZFb3uo_Zir-5IIiUPCsyG_kNNTLESKDQtgqVZyypQEEuu4ChGAJjZoD-yjAnhfY6M0F8Vd_GW3sKu-xUkOfpKRzJKmXvLF1gSKTTSiVtwEc7IYUTqRRwRoQ4u-UCmM_ikO3CSaHWdHjoE2EBCrTVh34bJC6cxkLYMo3epc_zhW1RuKWXkBP-FCc6zBGKJuvACiWrg1s-cwFKVpIPUuJnPNVkgU76ieLlSC0ldCBUc8OaySRbl0JIw_H_uYytR185Jo80exkhCjZAVmvLDFywbBj8EJ3zdPz4QL5UEtHdQQp6QGjmshB1sgWMarJ8oVFEADsDoCUtOGslg5GySmi7OHuJli3vutawvN0TnNt1V4bhU2gPU3lyoUrqpHClR4FVc8IsMnWme4haJyZAep4LoRynuFqRkLVNyY7ZsRAcAFXcoO5MojayMB0NBPcyLE_isMLqikkyzI7Icj-rUhaVlBJfl5GnmURMQz9GUCsdYTeckxZAALqpNJcjO6YWoF6BIyByd2a8dslAJ5FfZOIuM1JqzJ3ls4gxKWpra3w2O4VEKGE6Meo6k-yCcDzrddAWeiOYcAWTsnZ3TB19SwUKRlKnFbggw7AUstF3aSJePHtyqDveDFKdGadkaH16rLLKc6RDS_zWaNLaVq3sI2YUBrKkE5qYiohvBAt6nE5ltRvwsMAmGiV7IIVBA6aec2LxxCV6F5EbWJv1MFN8hgxqsIWXkGKweUzAkw4VrNCloF-xhvDMl3DMmJ2hvJePwm-QlvUqs6M5aYo9C1Iskxo6iPpmUka5EfF1sUaWSn-viHS_o5rpmGm7hzddbFfeWWVMyx20uCLgRUoIx-RLdLrdbKmbcD6MaoomgOjNaCThwERMiEtamsJtZCTUazaZYpQWssjdPNzRp8nuSTe4Y6WgBVyTVcbsqar-bUpeLrQrdwJhaCHXxQSjXO_yG-XRQ';
-const GENERATED_RUSSIA_BRIDGE_TAG_RE =
-    /^(?:(?:wlrussiaejx|wlrussiagh|wlrussia|ruwl)(?:oc|vk|cv|sk|yc|ng))\d+$/;
-
 @Injectable()
 export class RootService {
     private readonly logger = new Logger(RootService.name);
 
     private readonly isMarzbanLegacyLinkEnabled: boolean;
     private readonly marzbanSecretKey?: string;
-    private bridgeOutboundsCache: XrayOutbound[] = [];
-    private bridgeOutboundsCacheAt = 0;
-    private bridgeOutboundsFetchPromise: Promise<XrayOutbound[]> | null = null;
 
     constructor(
         private readonly configService: ConfigService,
@@ -133,10 +104,7 @@ export class RootService {
 
             // Без /mihomo в пути, но UA mihomo/clash — запрашиваем у панели mihomo-конфиг
             const effectiveClientType: TRequestTemplateTypeKeys | undefined =
-                clientType ??
-                (this.isMihomoUserAgent(userAgent as string)
-                    ? ('mihomo' as TRequestTemplateTypeKeys)
-                    : undefined);
+                clientType ?? (this.isMihomoUserAgent(userAgent as string) ? ('mihomo' as TRequestTemplateTypeKeys) : undefined);
 
             let subscriptionDataResponse: {
                 response: unknown;
@@ -170,12 +138,8 @@ export class RootService {
             // Модифицируем Xray JSON, если это он
             let responseData = subscriptionDataResponse.response;
             if (this.isXrayJsonResponse(responseData)) {
-                const bridgeOutbounds = await this.getCachedBridgeOutbounds();
-                responseData = this.modifyXrayJsonConfig(
-                    responseData as XrayConfig[],
-                    bridgeOutbounds,
-                );
-
+                responseData = this.modifyXrayJsonConfig(responseData as XrayConfig[]);
+                
                 // Удаляем заголовки кэширования, т.к. мы модифицировали данные
                 res.removeHeader('etag');
                 res.removeHeader('last-modified');
@@ -249,110 +213,9 @@ export class RootService {
 
     private isMihomoYaml(str: string): boolean {
         return (
-            str.includes('proxies:') && (str.includes('mixed-port') || str.includes('proxy-groups'))
+            str.includes('proxies:') &&
+            (str.includes('mixed-port') || str.includes('proxy-groups'))
         );
-    }
-
-    private cloneXrayOutbound(outbound: XrayOutbound): XrayOutbound {
-        return JSON.parse(JSON.stringify(outbound)) as XrayOutbound;
-    }
-
-    private cloneUnknown<T>(value: T): T {
-        return JSON.parse(JSON.stringify(value)) as T;
-    }
-
-    private async getCachedBridgeOutbounds(): Promise<XrayOutbound[]> {
-        const now = Date.now();
-
-        if (
-            this.bridgeOutboundsCache.length > 0 &&
-            now - this.bridgeOutboundsCacheAt < BRIDGE_SUBSCRIPTION_CACHE_TTL_MS
-        ) {
-            return this.bridgeOutboundsCache.map((outbound) => this.cloneXrayOutbound(outbound));
-        }
-
-        if (!this.bridgeOutboundsFetchPromise) {
-            this.bridgeOutboundsFetchPromise = this.fetchBridgeOutbounds();
-        }
-
-        try {
-            const fetchedOutbounds = await this.bridgeOutboundsFetchPromise;
-
-            if (fetchedOutbounds.length > 0) {
-                this.bridgeOutboundsCache = fetchedOutbounds.map((outbound) =>
-                    this.cloneXrayOutbound(outbound),
-                );
-                this.bridgeOutboundsCacheAt = Date.now();
-            } else {
-                this.logger.warn('Xray bridge subscription returned zero tp_BRIDGE outbounds');
-            }
-        } catch (error) {
-            this.logger.warn('Xray bridge subscription fetch failed, using cached data', error);
-        } finally {
-            this.bridgeOutboundsFetchPromise = null;
-        }
-
-        return this.bridgeOutboundsCache.map((outbound) => this.cloneXrayOutbound(outbound));
-    }
-
-    private async fetchBridgeOutbounds(): Promise<XrayOutbound[]> {
-        const response = await axios.get<unknown>(BRIDGE_SUBSCRIPTION_URL, {
-            headers: BRIDGE_SUBSCRIPTION_HEADERS,
-            timeout: 30_000,
-        });
-
-        if (!this.isXrayJsonResponse(response.data)) {
-            this.logger.warn('Xray bridge subscription response is not Xray JSON');
-            return [];
-        }
-
-        const bridgeOutbounds = this.extractBridgeOutbounds(response.data as XrayConfig[]);
-        this.logger.log(`Xray bridge subscription fetched outbounds=${bridgeOutbounds.length}`);
-
-        return bridgeOutbounds;
-    }
-
-    private extractBridgeOutbounds(configs: XrayConfig[]): XrayOutbound[] {
-        const grouped = new Map<BridgeGroup, XrayOutbound[]>(
-            BRIDGE_GROUP_ORDER.map((group) => [group, []]),
-        );
-
-        for (const config of configs) {
-            for (const outbound of config.outbounds) {
-                const bridgeGroup = this.getBridgeGroup(outbound.tag);
-                if (!bridgeGroup) continue;
-
-                grouped.get(bridgeGroup)!.push(outbound);
-            }
-        }
-
-        const renamedOutbounds: XrayOutbound[] = [];
-
-        for (const group of BRIDGE_GROUP_ORDER) {
-            const outbounds = grouped.get(group)!;
-            const tagPrefix = BRIDGE_GROUP_TO_SELECTOR[group];
-
-            outbounds.forEach((outbound, index) => {
-                const cloned = this.cloneXrayOutbound(outbound);
-                cloned.tag = `${tagPrefix}${index + 1}`;
-                renamedOutbounds.push(cloned);
-            });
-        }
-
-        return renamedOutbounds;
-    }
-
-    private getBridgeGroup(tag: string): BridgeGroup | null {
-        if (!tag.startsWith('tp_BRIDGE')) {
-            return null;
-        }
-
-        const groupMatch = tag.match(/\.grp_(OC|VK|CV|SK|YC|NG)(?:\.|$)/);
-        if (!groupMatch) {
-            return null;
-        }
-
-        return groupMatch[1].toLowerCase() as BridgeGroup;
     }
 
     private async returnWebpage(
@@ -715,132 +578,13 @@ export class RootService {
         return cloned;
     }
 
-    private getOutboundMux(outbound: XrayOutbound | undefined | null): unknown | undefined {
-        if (!outbound || outbound.mux === undefined) {
-            return undefined;
-        }
-
-        return this.cloneUnknown(outbound.mux);
-    }
-
-    private withRemnawaveMux(outbounds: XrayOutbound[], mux: unknown | undefined): XrayOutbound[] {
-        return outbounds.map((outbound) => {
-            const cloned = this.cloneXrayOutbound(outbound);
-
-            if (mux !== undefined) {
-                cloned.mux = this.cloneUnknown(mux);
-            } else {
-                delete cloned.mux;
-            }
-
-            return cloned;
-        });
-    }
-
-    private extractOutboundAddress(outbound: XrayOutbound): string | null {
-        try {
-            const settings = outbound.settings as {
-                vnext?: Array<{
-                    address?: unknown;
-                }>;
-            };
-            const address = settings?.vnext?.[0]?.address;
-
-            return typeof address === 'string' && address.length > 0 ? address : null;
-        } catch (error) {
-            this.logger.debug(`Failed to extract outbound address: ${error}`);
-            return null;
-        }
-    }
-
-    private buildWsBridgeOutbounds(sourceOutbounds: XrayOutbound[]): XrayOutbound[] {
-        const usedTags = new Set<string>();
-        const wsOutbounds: XrayOutbound[] = [];
-
-        for (const sourceOutbound of sourceOutbounds) {
-            if (
-                !sourceOutbound.tag ||
-                sourceOutbound.tag.startsWith('ws') ||
-                sourceOutbound.tag.startsWith('wlrussia')
-            ) {
-                continue;
-            }
-
-            const address = this.extractOutboundAddress(sourceOutbound);
-            if (!address) {
-                continue;
-            }
-
-            const tag = this.ensureUniqueWsTag(`ws${sourceOutbound.tag}`, usedTags);
-            wsOutbounds.push({
-                protocol: 'vless',
-                settings: {
-                    vnext: [
-                        {
-                            address,
-                            port: WS_BRIDGE_PORT,
-                            users: [
-                                {
-                                    encryption: WS_BRIDGE_ENCRYPTION,
-                                    flow: '',
-                                    id: WS_BRIDGE_ID,
-                                },
-                            ],
-                        },
-                    ],
-                },
-                streamSettings: {
-                    network: 'ws',
-                    security: 'none',
-                    sockopt: {
-                        dialerProxy: 'RU-DIALER',
-                    },
-                    wsSettings: {
-                        path: '/',
-                    },
-                },
-                tag,
-            });
-        }
-
-        return wsOutbounds;
-    }
-
-    private ensureUniqueWsTag(baseTag: string, usedTags: Set<string>): string {
-        if (!usedTags.has(baseTag)) {
-            usedTags.add(baseTag);
-            return baseTag;
-        }
-
-        let index = 2;
-        while (usedTags.has(`${baseTag}_${index}`)) {
-            index += 1;
-        }
-
-        const uniqueTag = `${baseTag}_${index}`;
-        usedTags.add(uniqueTag);
-
-        return uniqueTag;
-    }
-
-    private removeGeneratedBridgeOutbounds(outbounds: XrayOutbound[]): XrayOutbound[] {
-        return outbounds.filter(
-            (outbound) =>
-                !GENERATED_RUSSIA_BRIDGE_TAG_RE.test(outbound.tag) &&
-                !outbound.tag.startsWith('tp_BRIDGE'),
-        );
-    }
-
     /**
      * Модифицирует Xray JSON конфигурацию:
      * 1. Fastest: удаляет proxy, добавляет outbounds из ВСЕХ дочерних
      * 2. Чистые конфиги: удаляют proxy, получают outbounds из дочерних той же страны + russia outbounds
      * 3. Дочерние конфиги: удаляются из результата
      */
-    private modifyXrayJsonConfig(
-        configs: XrayConfig[],
-        bridgeOutbounds: XrayOutbound[] = [],
-    ): XrayConfig[] {
+    private modifyXrayJsonConfig(configs: XrayConfig[]): XrayConfig[] {
         // ========== Шаг 1: Классификация конфигов ==========
         let fastestConfig: XrayConfig | null = null;
         const cleanConfigs: XrayConfig[] = [];
@@ -894,7 +638,6 @@ export class RootService {
         const fastestId = fastestProxyOutbound
             ? this.extractIdFromOutbound(fastestProxyOutbound)
             : null;
-        const fastestProxyMux = this.getOutboundMux(fastestProxyOutbound);
 
         // ========== Шаг 5: Собираем ВСЕ proxy outbounds из дочерних для Fastest ==========
         const allChildOutbounds: XrayOutbound[] = [];
@@ -917,20 +660,8 @@ export class RootService {
         }
 
         // ========== Шаг 6: Модифицируем Fastest ==========
-        const fastestNonProxyOutbounds = this.removeGeneratedBridgeOutbounds(
-            fastestConfig.outbounds.filter((o) => o.tag !== 'proxy'),
-        );
-        const fastestWsOutbounds = this.buildWsBridgeOutbounds(allChildOutbounds);
-        const fastestMux =
-            fastestProxyMux ??
-            this.getOutboundMux(allChildOutbounds.find((outbound) => outbound.mux !== undefined));
-        const fastestBridgeOutbounds = this.withRemnawaveMux(bridgeOutbounds, fastestMux);
-        fastestConfig.outbounds = [
-            ...fastestNonProxyOutbounds,
-            ...allChildOutbounds,
-            ...fastestWsOutbounds,
-            ...fastestBridgeOutbounds,
-        ];
+        const fastestNonProxyOutbounds = fastestConfig.outbounds.filter((o) => o.tag !== 'proxy');
+        fastestConfig.outbounds = [...fastestNonProxyOutbounds, ...allChildOutbounds];
 
         // ========== Шаг 7: Модифицируем чистые конфиги ==========
         const resultConfigs: XrayConfig[] = [fastestConfig];
@@ -944,7 +675,6 @@ export class RootService {
             const cleanId = cleanProxyOutbound
                 ? this.extractIdFromOutbound(cleanProxyOutbound)
                 : null;
-            const cleanProxyMux = this.getOutboundMux(cleanProxyOutbound);
 
             // Получаем дочерние конфиги этой страны
             const children = childByFlag.get(flag) || [];
@@ -969,17 +699,10 @@ export class RootService {
             }
 
             // Берём все не-proxy outbounds из чистого конфига
-            const nonProxyOutbounds = this.removeGeneratedBridgeOutbounds(
-                cleanConfig.outbounds.filter((o) => o.tag !== 'proxy'),
-            );
+            const nonProxyOutbounds = cleanConfig.outbounds.filter((o) => o.tag !== 'proxy');
 
             // Формируем новые outbounds
-            const wsOutbounds = this.buildWsBridgeOutbounds(childOutbounds);
-            const newOutbounds: XrayOutbound[] = [
-                ...childOutbounds,
-                ...wsOutbounds,
-                ...nonProxyOutbounds,
-            ];
+            const newOutbounds: XrayOutbound[] = [...childOutbounds, ...nonProxyOutbounds];
 
             // Добавляем ВСЕ russia outbounds (кроме самого Russia)
             if (!this.isRussiaByIsoCode(isoCode)) {
@@ -991,20 +714,12 @@ export class RootService {
 
                     // Заменяем id на id из чистого конфига только для outbounds с префиксом "wlrussia"
                     if (cleanId && russiaOutbound.tag.startsWith('wlrussia')) {
-                        clonedRussiaOutbound = this.replaceOutboundId(
-                            clonedRussiaOutbound,
-                            cleanId,
-                        );
+                        clonedRussiaOutbound = this.replaceOutboundId(clonedRussiaOutbound, cleanId);
                     }
 
                     newOutbounds.push(clonedRussiaOutbound);
                 }
             }
-
-            const cleanMux =
-                cleanProxyMux ??
-                this.getOutboundMux(childOutbounds.find((outbound) => outbound.mux !== undefined));
-            newOutbounds.push(...this.withRemnawaveMux(bridgeOutbounds, cleanMux));
 
             // Обновляем конфиг (remarks остаётся как есть)
             const modifiedConfig: XrayConfig = {
