@@ -1,5 +1,3 @@
-import { RawAxiosResponseHeaders } from 'axios';
-import { AxiosResponseHeaders } from 'axios';
 import { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
@@ -12,11 +10,11 @@ import { Logger } from '@nestjs/common';
 import { TRequestTemplateTypeKeys } from '@remnawave/backend-contract';
 
 import { AxiosService } from '@common/axios/axios.service';
+import { IGNORED_HEADERS } from '@common/constants';
 import { sanitizeUsername } from '@common/utils';
 
-import { modifyMihomoConfig } from './mihomo-config.util';
+import { SubpageConfigService } from './subpage-config.service';
 
-// Интерфейсы для Xray JSON конфигурации
 interface XrayOutbound {
     tag: string;
     protocol: string;
@@ -41,17 +39,28 @@ export class RootService {
     private readonly logger = new Logger(RootService.name);
 
     private readonly isMarzbanLegacyLinkEnabled: boolean;
-    private readonly marzbanSecretKey?: string;
-
+    private readonly marzbanSecretKeys: string[];
+    private readonly mlDropRevokedSubscriptions: boolean;
     constructor(
         private readonly configService: ConfigService,
         private readonly jwtService: JwtService,
         private readonly axiosService: AxiosService,
+        private readonly subpageConfigService: SubpageConfigService,
     ) {
         this.isMarzbanLegacyLinkEnabled = this.configService.getOrThrow<boolean>(
             'MARZBAN_LEGACY_LINK_ENABLED',
         );
-        this.marzbanSecretKey = this.configService.get<string>('MARZBAN_LEGACY_SECRET_KEY');
+        this.mlDropRevokedSubscriptions = this.configService.getOrThrow<boolean>(
+            'MARZBAN_LEGACY_DROP_REVOKED_SUBSCRIPTIONS',
+        );
+
+        const marzbanSecretKeys = this.configService.get<string>('MARZBAN_LEGACY_SECRET_KEY');
+
+        if (marzbanSecretKeys && marzbanSecretKeys.length > 0) {
+            this.marzbanSecretKeys = marzbanSecretKeys.split(',').map((key) => key.trim());
+        } else {
+            this.marzbanSecretKeys = [];
+        }
     }
 
     public async serveSubscriptionPage(
@@ -72,7 +81,7 @@ export class RootService {
             }
 
             if (this.isMarzbanLegacyLinkEnabled) {
-                const username = await this.decodeMarzbanLink(shortUuid);
+                const username = await this.tryDecodeMarzbanLink(shortUuid);
 
                 if (username) {
                     const sanitizedUsername = sanitizeUsername(username.username);
@@ -92,6 +101,12 @@ export class RootService {
 
                         res.socket?.destroy();
                         return;
+                    } else if (
+                        this.mlDropRevokedSubscriptions &&
+                        userInfo.response.response.subRevokedAt !== null
+                    ) {
+                        res.socket?.destroy();
+                        return;
                     }
 
                     shortUuidLocal = userInfo.response.response.shortUuid;
@@ -102,21 +117,12 @@ export class RootService {
                 return this.returnWebpage(clientIp, req, res, shortUuidLocal);
             }
 
-            // Без /mihomo в пути, но UA mihomo/clash — запрашиваем у панели mihomo-конфиг
-            const effectiveClientType: TRequestTemplateTypeKeys | undefined =
-                clientType ?? (this.isMihomoUserAgent(userAgent as string) ? ('mihomo' as TRequestTemplateTypeKeys) : undefined);
-
-            let subscriptionDataResponse: {
-                response: unknown;
-                headers: RawAxiosResponseHeaders | AxiosResponseHeaders;
-            } | null = null;
-
-            subscriptionDataResponse = await this.axiosService.getSubscription(
+            const subscriptionDataResponse = await this.axiosService.getSubscription(
                 clientIp,
                 shortUuidLocal,
                 req.headers,
-                !!effectiveClientType,
-                effectiveClientType,
+                !!clientType,
+                clientType,
             );
 
             if (!subscriptionDataResponse) {
@@ -126,41 +132,23 @@ export class RootService {
 
             if (subscriptionDataResponse.headers) {
                 Object.entries(subscriptionDataResponse.headers)
-                    .filter(([key]) => {
-                        const ignoredHeaders = ['transfer-encoding', 'content-length', 'server'];
-                        return !ignoredHeaders.includes(key.toLowerCase());
-                    })
+                    .filter(([key]) => !IGNORED_HEADERS.has(key.toLowerCase()))
                     .forEach(([key, value]) => {
                         res.setHeader(key, value);
                     });
             }
 
-            // Модифицируем Xray JSON, если это он
             let responseData = subscriptionDataResponse.response;
             if (this.isXrayJsonResponse(responseData)) {
                 responseData = this.modifyXrayJsonConfig(responseData as XrayConfig[]);
-                
-                // Удаляем заголовки кэширования, т.к. мы модифицировали данные
-                res.removeHeader('etag');
-                res.removeHeader('last-modified');
-                res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            }
 
-            // Модифицируем конфиг mihomo (Clash): запрос был по /mihomo или по UA (effectiveClientType уже 'mihomo')
-            if (effectiveClientType === 'mihomo' && typeof responseData === 'string') {
-                this.logger.log(
-                    `[mihomo] shortUuid=${shortUuidLocal}, byPath=${clientType === 'mihomo'}, ua=${(userAgent as string)?.slice(0, 50)}, response length=${(responseData as string).length} chars, modifying`,
-                );
-                responseData = modifyMihomoConfig(responseData);
-                this.logger.log(
-                    `[mihomo] modified, new length=${(responseData as string).length} chars`,
-                );
                 res.removeHeader('etag');
                 res.removeHeader('last-modified');
                 res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
             }
 
             res.status(200).send(responseData);
+            return;
         } catch (error) {
             this.logger.error('Error in serveSubscriptionPage', error);
 
@@ -169,13 +157,14 @@ export class RootService {
         }
     }
 
-    private async generateJwtForCookie(): Promise<string> {
+    private generateJwtForCookie(uuid: string | null): string {
         return this.jwtService.sign(
             {
                 sessionId: nanoid(32),
+                su: this.subpageConfigService.getEncryptedSubpageConfigUuid(uuid),
             },
             {
-                expiresIn: '1h',
+                expiresIn: '33m',
             },
         );
     }
@@ -189,33 +178,26 @@ export class RootService {
             'Opera',
             'Edge',
             'TelegramBot',
+            'WhatsApp',
         ];
 
         return browserKeywords.some((keyword) => userAgent.includes(keyword));
     }
 
     private isGenericPath(path: string): boolean {
-        const genericPaths = ['favicon.ico', 'robots.txt'];
+        const genericPaths = [
+            'favicon.ico',
+            'robots.txt',
+            '.png',
+            '.jpg',
+            '.jpeg',
+            '.gif',
+            '.svg',
+            '.webp',
+            '.ico',
+        ];
 
         return genericPaths.some((genericPath) => path.includes(genericPath));
-    }
-
-    private isMihomoUserAgent(ua: string | undefined): boolean {
-        if (!ua || typeof ua !== 'string') return false;
-        const lower = ua.toLowerCase();
-        return (
-            lower.includes('mihomo') ||
-            lower.includes('clash') ||
-            lower.includes('stash') ||
-            lower.includes('koala-clash')
-        );
-    }
-
-    private isMihomoYaml(str: string): boolean {
-        return (
-            str.includes('proxies:') &&
-            (str.includes('mixed-port') || str.includes('proxy-groups'))
-        );
     }
 
     private async returnWebpage(
@@ -225,49 +207,70 @@ export class RootService {
         shortUuid: string,
     ): Promise<void> {
         try {
-            const cookieJwt = await this.generateJwtForCookie();
-
             const subscriptionDataResponse = await this.axiosService.getSubscriptionInfo(
                 clientIp,
                 shortUuid,
             );
 
-            if (!subscriptionDataResponse.isOk) {
-                this.logger.error(`Get subscription info failed, shortUuid: ${shortUuid}`);
-
+            if (!subscriptionDataResponse.isOk || !subscriptionDataResponse.response) {
                 res.socket?.destroy();
                 return;
             }
 
+            const subpageConfigResponse = await this.axiosService.getSubpageConfig(
+                shortUuid,
+                req.headers,
+            );
+
+            if (!subpageConfigResponse.isOk || !subpageConfigResponse.response) {
+                res.socket?.destroy();
+                return;
+            }
+
+            const subpageConfig = subpageConfigResponse.response;
+
+            if (subpageConfig.webpageAllowed === false) {
+                this.logger.log(`Webpage access is not allowed by Remnawave's SRR.`);
+                res.socket?.destroy();
+                return;
+            }
+
+            const baseSettings = this.subpageConfigService.getBaseSettings(
+                subpageConfig.subpageConfigUuid,
+            );
+
             const subscriptionData = subscriptionDataResponse.response;
 
-            res.cookie('session', cookieJwt, {
+            if (!baseSettings.showConnectionKeys) {
+                subscriptionData.response.links = [];
+                subscriptionData.response.ssConfLinks = {};
+            }
+
+            res.cookie('session', this.generateJwtForCookie(subpageConfig.subpageConfigUuid), {
                 httpOnly: true,
                 secure: true,
-                maxAge: 3_600_000, // 1 hour
+                maxAge: 1_800_000, // 30 minutes
             });
 
             res.render('index', {
-                metaTitle: this.configService
-                    .getOrThrow<string>('META_TITLE')
-                    .replace(/^"|"$/g, ''),
-                metaDescription: this.configService
-                    .getOrThrow<string>('META_DESCRIPTION')
-                    .replace(/^"|"$/g, ''),
+                metaTitle: baseSettings.metaTitle,
+                metaDescription: baseSettings.metaDescription,
                 panelData: Buffer.from(JSON.stringify(subscriptionData)).toString('base64'),
             });
         } catch (error) {
-            this.logger.error('Error in returnWebpage', error);
+            this.logger.error(`Error in returnWebpage: ${error}`);
 
             res.socket?.destroy();
             return;
         }
     }
 
-    private async decodeMarzbanLink(shortUuid: string): Promise<{
+    private async tryDecodeMarzbanLink(shortUuid: string): Promise<{
         username: string;
         createdAt: Date;
     } | null> {
+        if (!this.marzbanSecretKeys.length) return null;
+
         const token = shortUuid;
         this.logger.debug(`Verifying token: ${token}`);
 
@@ -276,10 +279,29 @@ export class RootService {
             return null;
         }
 
+        for (const key of this.marzbanSecretKeys) {
+            const result = await this.decodeMarzbanLink(shortUuid, key);
+            if (result) return result;
+
+            this.logger.debug(`Decoding Marzban link failed with key: ${key}`);
+        }
+
+        this.logger.debug(`Decoding Marzban link failed with all keys`);
+
+        return null;
+    }
+
+    private async decodeMarzbanLink(
+        token: string,
+        marzbanSecretKey: string,
+    ): Promise<{
+        username: string;
+        createdAt: Date;
+    } | null> {
         if (token.split('.').length === 3) {
             try {
                 const payload = await this.jwtService.verifyAsync(token, {
-                    secret: this.marzbanSecretKey!,
+                    secret: marzbanSecretKey,
                     algorithms: ['HS256'],
                 });
 
@@ -318,7 +340,7 @@ export class RootService {
         }
 
         const hash = createHash('sha256');
-        hash.update(uToken + this.marzbanSecretKey!);
+        hash.update(uToken + marzbanSecretKey);
         const digest = hash.digest();
 
         const expectedSignature = Buffer.from(digest).toString('base64url').slice(0, 10);
@@ -554,8 +576,8 @@ export class RootService {
     }
 
     /**
-     * Заменяет id в outbound на новый id
-     * Делает глубокую копию, чтобы не изменять исходный объект
+     * Заменяет пользовательский UUID/auth в outbound на новый UUID.
+     * Делает глубокую копию, чтобы не изменять исходный объект.
      */
     private replaceOutboundId(outbound: XrayOutbound, newId: string): XrayOutbound {
         // Глубокая копия outbound
@@ -570,6 +592,14 @@ export class RootService {
 
             if (settings?.vnext?.[0]?.users?.[0]) {
                 settings.vnext[0].users[0].id = newId;
+            }
+
+            const streamSettings = cloned.streamSettings as {
+                hysteriaSettings?: { auth?: string; [key: string]: unknown };
+            };
+
+            if (streamSettings?.hysteriaSettings?.auth) {
+                streamSettings.hysteriaSettings.auth = newId;
             }
         } catch (error) {
             this.logger.debug(`Failed to replace id in outbound: ${error}`);
