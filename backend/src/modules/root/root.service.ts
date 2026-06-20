@@ -2,13 +2,13 @@ import { Request, Response } from 'express';
 import { createHash } from 'node:crypto';
 import { nanoid } from 'nanoid';
 
-import { ConfigService } from '@nestjs/config';
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Logger } from '@nestjs/common';
 
 import { TRequestTemplateTypeKeys } from '@remnawave/backend-contract';
 
+import { TypedConfigService } from '@common/config/app-config';
 import { AxiosService } from '@common/axios/axios.service';
 import { IGNORED_HEADERS } from '@common/constants';
 import { sanitizeUsername } from '@common/utils';
@@ -42,19 +42,19 @@ export class RootService {
     private readonly marzbanSecretKeys: string[];
     private readonly mlDropRevokedSubscriptions: boolean;
     constructor(
-        private readonly configService: ConfigService,
+        private readonly configService: TypedConfigService,
         private readonly jwtService: JwtService,
         private readonly axiosService: AxiosService,
         private readonly subpageConfigService: SubpageConfigService,
     ) {
-        this.isMarzbanLegacyLinkEnabled = this.configService.getOrThrow<boolean>(
+        this.isMarzbanLegacyLinkEnabled = this.configService.getOrThrow(
             'MARZBAN_LEGACY_LINK_ENABLED',
         );
-        this.mlDropRevokedSubscriptions = this.configService.getOrThrow<boolean>(
+        this.mlDropRevokedSubscriptions = this.configService.getOrThrow(
             'MARZBAN_LEGACY_DROP_REVOKED_SUBSCRIPTIONS',
         );
 
-        const marzbanSecretKeys = this.configService.get<string>('MARZBAN_LEGACY_SECRET_KEY');
+        const marzbanSecretKeys = this.configService.get('MARZBAN_LEGACY_SECRET_KEY');
 
         if (marzbanSecretKeys && marzbanSecretKeys.length > 0) {
             this.marzbanSecretKeys = marzbanSecretKeys.split(',').map((key) => key.trim());
@@ -381,9 +381,7 @@ export class RootService {
     }
 
     private checkSubscriptionValidity(createdAt: Date, username: string): boolean {
-        const validFrom = this.configService.get<string | undefined>(
-            'MARZBAN_LEGACY_SUBSCRIPTION_VALID_FROM',
-        );
+        const validFrom = this.configService.get('MARZBAN_LEGACY_SUBSCRIPTION_VALID_FROM');
 
         if (!validFrom) {
             return true;
@@ -405,19 +403,11 @@ export class RootService {
         return true;
     }
 
-    /**
-     * Проверяет, является ли ответ Xray JSON конфигурацией
-     */
     private isXrayJsonResponse(response: unknown): boolean {
-        if (!Array.isArray(response)) {
+        if (!Array.isArray(response) || response.length === 0) {
             return false;
         }
 
-        if (response.length === 0) {
-            return false;
-        }
-
-        // Проверяем, что каждый элемент имеет remarks и outbounds
         return response.every(
             (item) =>
                 typeof item === 'object' &&
@@ -428,10 +418,6 @@ export class RootService {
         );
     }
 
-    /**
-     * Маппинг ISO кода страны на название
-     * Стандарт ISO 3166-1 alpha-2
-     */
     private readonly ISO_TO_COUNTRY: Record<string, string> = {
         PL: 'Poland',
         DE: 'Germany',
@@ -472,77 +458,42 @@ export class RootService {
         EU: 'Europe',
     };
 
-    /**
-     * Извлекает эмодзи флага из remarks (2 региональных индикатора = 1 флаг)
-     */
     private extractFlagEmoji(remarks: string): string {
         const match = remarks.match(/[\u{1F1E0}-\u{1F1FF}]{2}/gu);
         return match ? match[0] : '';
     }
 
-    /**
-     * Декодирует флаг эмодзи в ISO 3166-1 alpha-2 код
-     * 🇵🇱 → "PL", 🇩🇪 → "DE", 🇷🇺 → "RU"
-     */
     private flagToIsoCode(flag: string): string {
         if (!flag || flag.length < 2) return '';
 
         const codePoints = [...flag].map((char) => char.codePointAt(0) || 0);
-        const REGIONAL_A = 0x1f1e6; // Regional Indicator Symbol Letter A
+        const regionalA = 0x1f1e6;
 
-        const letters = codePoints
-            .filter((cp) => cp >= REGIONAL_A && cp <= 0x1f1ff)
-            .map((cp) => String.fromCharCode(cp - REGIONAL_A + 65)) // 65 = 'A'
+        return codePoints
+            .filter((codePoint) => codePoint >= regionalA && codePoint <= 0x1f1ff)
+            .map((codePoint) => String.fromCharCode(codePoint - regionalA + 65))
             .join('');
-
-        return letters;
     }
 
-    /**
-     * Получает название страны по флагу
-     * 🇵🇱 → "Poland", 🇩🇪 → "Germany"
-     * Если страна не в маппинге — возвращает ISO код
-     */
     private getCountryNameByFlag(flag: string): string {
         const isoCode = this.flagToIsoCode(flag);
         return this.ISO_TO_COUNTRY[isoCode] || isoCode;
     }
 
-    /**
-     * Создаёт tag из remarks:
-     * - Убирает эмодзи, скобки, спецсимволы
-     * - Оставляет только буквы и цифры
-     * - lowercase
-     * "🇵🇱 Poland1??" → "poland1"
-     * "🇸🇪 [L7] Sweden!" → "sweden"
-     */
     private createTagFromRemarks(remarks: string): string {
         const withoutEmoji = remarks.replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '');
         const withoutBrackets = withoutEmoji.replace(/\[.*?\]/g, '');
-        // Оставляем только буквы и цифры
-        const sanitized = withoutBrackets.replace(/[^a-zA-Z0-9]/g, '');
-        return sanitized.toLowerCase();
+        return withoutBrackets.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
     }
 
-    /**
-     * Проверяет, является ли конфиг "Fastest" (специальный конфиг с балансировкой)
-     */
     private isFastestConfig(remarks: string): boolean {
         return remarks.toLowerCase().includes('fastest');
     }
 
-    /**
-     * Проверяет, является ли страна Russia (для неё не добавляем russia outbounds)
-     */
     private isRussiaByIsoCode(isoCode: string): boolean {
         return isoCode === 'RU';
     }
 
-    /**
-     * Проверяет, является ли конфиг "чистым" (remarks = флаг + название страны точно)
-     * "🇵🇱 Poland" → true (чистый)
-     * "🇵🇱 Poland1" → false (дочерний)
-     */
     private isCleanConfig(remarks: string): boolean {
         const flag = this.extractFlagEmoji(remarks);
         if (!flag) return false;
@@ -553,10 +504,6 @@ export class RootService {
         return remarksWithoutEmoji.toLowerCase() === countryName.toLowerCase();
     }
 
-    /**
-     * Извлекает id из proxy outbound
-     * Путь: settings.vnext[0].users[0].id
-     */
     private extractIdFromOutbound(outbound: XrayOutbound): string | null {
         try {
             const settings = outbound.settings as {
@@ -575,12 +522,7 @@ export class RootService {
         return null;
     }
 
-    /**
-     * Заменяет пользовательский UUID/auth в outbound на новый UUID.
-     * Делает глубокую копию, чтобы не изменять исходный объект.
-     */
     private replaceOutboundId(outbound: XrayOutbound, newId: string): XrayOutbound {
-        // Глубокая копия outbound
         const cloned = JSON.parse(JSON.stringify(outbound)) as XrayOutbound;
 
         try {
@@ -608,14 +550,7 @@ export class RootService {
         return cloned;
     }
 
-    /**
-     * Модифицирует Xray JSON конфигурацию:
-     * 1. Fastest: удаляет proxy, добавляет outbounds из ВСЕХ дочерних
-     * 2. Чистые конфиги: удаляют proxy, получают outbounds из дочерних той же страны + russia outbounds
-     * 3. Дочерние конфиги: удаляются из результата
-     */
     private modifyXrayJsonConfig(configs: XrayConfig[]): XrayConfig[] {
-        // ========== Шаг 1: Классификация конфигов ==========
         let fastestConfig: XrayConfig | null = null;
         const cleanConfigs: XrayConfig[] = [];
         const childConfigs: XrayConfig[] = [];
@@ -635,7 +570,6 @@ export class RootService {
             return configs;
         }
 
-        // ========== Шаг 2: Группируем дочерние конфиги по флагу ==========
         const childByFlag = new Map<string, XrayConfig[]>();
 
         for (const config of childConfigs) {
@@ -648,116 +582,106 @@ export class RootService {
             childByFlag.get(flag)!.push(config);
         }
 
-        // ========== Шаг 3: Собираем ВСЕ Russia outbounds из дочерних ==========
-        const russiaFlag = '🇷🇺';
+        const russiaFlag = String.fromCodePoint(0x1f1f7, 0x1f1fa);
         const russiaChildConfigs = childByFlag.get(russiaFlag) || [];
         const russiaOutbounds: XrayOutbound[] = [];
 
         for (const config of russiaChildConfigs) {
-            const proxy = config.outbounds.find((o) => o.tag === 'proxy');
-            if (proxy) {
-                const tag = this.createTagFromRemarks(config.remarks);
-                if (tag) {
-                    russiaOutbounds.push({ ...proxy, tag });
-                }
+            const proxy = config.outbounds.find((outbound) => outbound.tag === 'proxy');
+            if (!proxy) continue;
+
+            const tag = this.createTagFromRemarks(config.remarks);
+            if (tag) {
+                russiaOutbounds.push({ ...proxy, tag });
             }
         }
 
-        // ========== Шаг 4: Извлекаем id из Fastest proxy outbound ==========
-        const fastestProxyOutbound = fastestConfig.outbounds.find((o) => o.tag === 'proxy');
+        const fastestProxyOutbound = fastestConfig.outbounds.find(
+            (outbound) => outbound.tag === 'proxy',
+        );
         const fastestId = fastestProxyOutbound
             ? this.extractIdFromOutbound(fastestProxyOutbound)
             : null;
 
-        // ========== Шаг 5: Собираем ВСЕ proxy outbounds из дочерних для Fastest ==========
         const allChildOutbounds: XrayOutbound[] = [];
 
         for (const config of childConfigs) {
-            const proxy = config.outbounds.find((o) => o.tag === 'proxy');
-            if (proxy) {
-                const tag = this.createTagFromRemarks(config.remarks);
-                if (tag) {
-                    let outbound: XrayOutbound = { ...proxy, tag };
+            const proxy = config.outbounds.find((outbound) => outbound.tag === 'proxy');
+            if (!proxy) continue;
 
-                    // Заменяем id на id из Fastest только для outbounds с префиксом "wlrussia"
-                    if (fastestId && tag.startsWith('wlrussia')) {
-                        outbound = this.replaceOutboundId(outbound, fastestId);
-                    }
+            const tag = this.createTagFromRemarks(config.remarks);
+            if (!tag) continue;
 
-                    allChildOutbounds.push(outbound);
-                }
+            let outbound: XrayOutbound = { ...proxy, tag };
+
+            if (fastestId && tag.startsWith('wlrussia')) {
+                outbound = this.replaceOutboundId(outbound, fastestId);
             }
+
+            allChildOutbounds.push(outbound);
         }
 
-        // ========== Шаг 6: Модифицируем Fastest ==========
-        const fastestNonProxyOutbounds = fastestConfig.outbounds.filter((o) => o.tag !== 'proxy');
+        const fastestNonProxyOutbounds = fastestConfig.outbounds.filter(
+            (outbound) => outbound.tag !== 'proxy',
+        );
         fastestConfig.outbounds = [...fastestNonProxyOutbounds, ...allChildOutbounds];
 
-        // ========== Шаг 7: Модифицируем чистые конфиги ==========
         const resultConfigs: XrayConfig[] = [fastestConfig];
 
         for (const cleanConfig of cleanConfigs) {
             const flag = this.extractFlagEmoji(cleanConfig.remarks);
             const isoCode = this.flagToIsoCode(flag);
-
-            // Извлекаем id из чистого конфига
-            const cleanProxyOutbound = cleanConfig.outbounds.find((o) => o.tag === 'proxy');
+            const cleanProxyOutbound = cleanConfig.outbounds.find(
+                (outbound) => outbound.tag === 'proxy',
+            );
             const cleanId = cleanProxyOutbound
                 ? this.extractIdFromOutbound(cleanProxyOutbound)
                 : null;
-
-            // Получаем дочерние конфиги этой страны
             const children = childByFlag.get(flag) || [];
-
-            // Собираем outbounds из дочерних
             const childOutbounds: XrayOutbound[] = [];
+
             for (const child of children) {
-                const proxy = child.outbounds.find((o) => o.tag === 'proxy');
-                if (proxy) {
-                    const tag = this.createTagFromRemarks(child.remarks);
-                    if (tag) {
-                        let outbound: XrayOutbound = { ...proxy, tag };
+                const proxy = child.outbounds.find((outbound) => outbound.tag === 'proxy');
+                if (!proxy) continue;
 
-                        // Заменяем id на id из чистого конфига только для outbounds с префиксом "wlrussia"
-                        if (cleanId && tag.startsWith('wlrussia')) {
-                            outbound = this.replaceOutboundId(outbound, cleanId);
-                        }
+                const tag = this.createTagFromRemarks(child.remarks);
+                if (!tag) continue;
 
-                        childOutbounds.push(outbound);
-                    }
+                let outbound: XrayOutbound = { ...proxy, tag };
+
+                if (cleanId && tag.startsWith('wlrussia')) {
+                    outbound = this.replaceOutboundId(outbound, cleanId);
                 }
+
+                childOutbounds.push(outbound);
             }
 
-            // Берём все не-proxy outbounds из чистого конфига
-            const nonProxyOutbounds = cleanConfig.outbounds.filter((o) => o.tag !== 'proxy');
-
-            // Формируем новые outbounds
+            const nonProxyOutbounds = cleanConfig.outbounds.filter(
+                (outbound) => outbound.tag !== 'proxy',
+            );
             const newOutbounds: XrayOutbound[] = [...childOutbounds, ...nonProxyOutbounds];
 
-            // Добавляем ВСЕ russia outbounds (кроме самого Russia)
             if (!this.isRussiaByIsoCode(isoCode)) {
                 for (const russiaOutbound of russiaOutbounds) {
-                    // Клонируем Russia outbound и заменяем id
-                    let clonedRussiaOutbound: XrayOutbound = JSON.parse(
+                    let clonedRussiaOutbound = JSON.parse(
                         JSON.stringify(russiaOutbound),
                     ) as XrayOutbound;
 
-                    // Заменяем id на id из чистого конфига только для outbounds с префиксом "wlrussia"
                     if (cleanId && russiaOutbound.tag.startsWith('wlrussia')) {
-                        clonedRussiaOutbound = this.replaceOutboundId(clonedRussiaOutbound, cleanId);
+                        clonedRussiaOutbound = this.replaceOutboundId(
+                            clonedRussiaOutbound,
+                            cleanId,
+                        );
                     }
 
                     newOutbounds.push(clonedRussiaOutbound);
                 }
             }
 
-            // Обновляем конфиг (remarks остаётся как есть)
-            const modifiedConfig: XrayConfig = {
+            resultConfigs.push({
                 ...cleanConfig,
                 outbounds: newOutbounds,
-            };
-
-            resultConfigs.push(modifiedConfig);
+            });
         }
 
         this.logger.debug(
