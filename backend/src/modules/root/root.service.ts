@@ -508,7 +508,6 @@ export class RootService {
         try {
             const settings = outbound.settings as {
                 vnext?: Array<{
-                    address?: unknown;
                     users?: Array<{ id?: string }>;
                 }>;
             };
@@ -521,97 +520,6 @@ export class RootService {
         }
 
         return null;
-    }
-
-    private extractVlessAddressFromOutbound(outbound: XrayOutbound): string | null {
-        if (outbound.protocol !== 'vless') {
-            return null;
-        }
-
-        try {
-            const settings = outbound.settings as {
-                vnext?: Array<{
-                    address?: unknown;
-                }>;
-            };
-            const address = settings?.vnext?.[0]?.address;
-
-            return typeof address === 'string' && address.trim().length > 0
-                ? address.trim().toLowerCase()
-                : null;
-        } catch (error) {
-            this.logger.debug(`Failed to extract vless address from outbound: ${error}`);
-            return null;
-        }
-    }
-
-    private extractHysteriaAddressFromOutbound(outbound: XrayOutbound): string | null {
-        if (outbound.protocol !== 'hysteria') {
-            return null;
-        }
-
-        try {
-            const settings = outbound.settings as {
-                address?: unknown;
-            };
-            const address = settings?.address;
-
-            return typeof address === 'string' && address.trim().length > 0
-                ? address.trim().toLowerCase()
-                : null;
-        } catch (error) {
-            this.logger.debug(`Failed to extract hysteria address from outbound: ${error}`);
-            return null;
-        }
-    }
-
-    private replaceHysteriaAuth(outbound: XrayOutbound, auth: string): XrayOutbound {
-        const cloned = JSON.parse(JSON.stringify(outbound)) as XrayOutbound;
-
-        try {
-            const streamSettings = cloned.streamSettings as {
-                hysteriaSettings?: { auth?: string; [key: string]: unknown };
-            };
-
-            if (streamSettings?.hysteriaSettings) {
-                streamSettings.hysteriaSettings.auth = auth;
-            }
-        } catch (error) {
-            this.logger.debug(`Failed to replace hysteria auth in outbound: ${error}`);
-        }
-
-        return cloned;
-    }
-
-    private syncHysteriaAuthByVlessAddress(outbounds: XrayOutbound[]): XrayOutbound[] {
-        const vlessIdByAddress = new Map<string, string>();
-
-        for (const outbound of outbounds) {
-            const address = this.extractVlessAddressFromOutbound(outbound);
-            const id = this.extractIdFromOutbound(outbound);
-
-            if (address && id && !vlessIdByAddress.has(address)) {
-                vlessIdByAddress.set(address, id);
-            }
-        }
-
-        if (vlessIdByAddress.size === 0) {
-            return outbounds;
-        }
-
-        return outbounds.map((outbound) => {
-            const address = this.extractHysteriaAddressFromOutbound(outbound);
-            if (!address) {
-                return outbound;
-            }
-
-            const vlessId = vlessIdByAddress.get(address);
-            if (!vlessId) {
-                return outbound;
-            }
-
-            return this.replaceHysteriaAuth(outbound, vlessId);
-        });
     }
 
     private replaceOutboundId(outbound: XrayOutbound, newId: string): XrayOutbound {
@@ -632,7 +540,7 @@ export class RootService {
                 hysteriaSettings?: { auth?: string; [key: string]: unknown };
             };
 
-            if (streamSettings?.hysteriaSettings) {
+            if (streamSettings?.hysteriaSettings?.auth) {
                 streamSettings.hysteriaSettings.auth = newId;
             }
         } catch (error) {
@@ -716,10 +624,7 @@ export class RootService {
         const fastestNonProxyOutbounds = fastestConfig.outbounds.filter(
             (outbound) => outbound.tag !== 'proxy',
         );
-        fastestConfig.outbounds = this.syncHysteriaAuthByVlessAddress([
-            ...fastestNonProxyOutbounds,
-            ...allChildOutbounds,
-        ]);
+        fastestConfig.outbounds = [...fastestNonProxyOutbounds, ...allChildOutbounds];
 
         const resultConfigs: XrayConfig[] = [fastestConfig];
 
@@ -775,7 +680,7 @@ export class RootService {
 
             resultConfigs.push({
                 ...cleanConfig,
-                outbounds: this.syncHysteriaAuthByVlessAddress(newOutbounds),
+                outbounds: newOutbounds,
             });
         }
 
